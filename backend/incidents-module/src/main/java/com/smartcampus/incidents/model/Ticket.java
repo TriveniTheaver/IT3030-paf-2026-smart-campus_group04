@@ -50,6 +50,7 @@ public class Ticket {
     @ElementCollection
     @CollectionTable(name = "ticket_attachments", joinColumns = @JoinColumn(name = "ticket_id"))
     @Column(name = "file_url")
+    @Builder.Default
     private List<String> attachments = new ArrayList<>();
 
     @Column(nullable = false)
