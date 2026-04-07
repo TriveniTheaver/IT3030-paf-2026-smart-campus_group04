@@ -1,7 +1,9 @@
 package com.smartcampus.incidents.service;
 
 import com.smartcampus.core.model.Notification;
+import com.smartcampus.core.model.User;
 import com.smartcampus.core.repository.NotificationRepository;
+import com.smartcampus.core.repository.UserRepository;
 import com.smartcampus.incidents.model.Comment;
 import com.smartcampus.incidents.model.Ticket;
 import com.smartcampus.incidents.model.TicketStatus;
@@ -22,6 +24,9 @@ public class TicketService {
 
     @Autowired
     private NotificationRepository notificationRepository;
+
+    @Autowired
+    private UserRepository userRepository;
 
     @Transactional
     public Ticket updateTicketStatus(Long ticketId, TicketStatus newStatus, String resolutionNotes) {
@@ -46,7 +51,7 @@ public class TicketService {
     @Transactional
     public Ticket assignTicket(Long ticketId, Long technicianId) {
         Ticket ticket = ticketRepository.findById(ticketId).orElseThrow(() -> new IllegalArgumentException("Ticket not found"));
-        com.smartcampus.core.model.User tech = com.smartcampus.core.repository.UserRepository.findById(technicianId)
+        User tech = userRepository.findById(technicianId)
                 .orElseThrow(() -> new IllegalArgumentException("Technician not found"));
         
         ticket.setAssignee(tech);
