@@ -3,9 +3,6 @@ package com.smartcampus.core.controller;
 import com.smartcampus.core.model.User;
 import com.smartcampus.core.repository.UserRepository;
 import com.smartcampus.core.security.JwtService;
-import lombok.AllArgsConstructor;
-import lombok.Data;
-import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -40,18 +37,33 @@ public class AuthController {
         return ResponseEntity.ok("User registered");
     }
 
-    @Data
-    @NoArgsConstructor
-    @AllArgsConstructor
     public static class LoginRequest {
         private String email;
         private String password;
+
+        public LoginRequest() {}
+
+        public LoginRequest(String email, String password) {
+            this.email = email;
+            this.password = password;
+        }
+
+        public String getEmail() { return email; }
+        public String getPassword() { return password; }
+        public void setEmail(String email) { this.email = email; }
+        public void setPassword(String password) { this.password = password; }
     }
 
-    @Data
-    @AllArgsConstructor
     public static class AuthResponse {
         private String token;
         private User user;
+
+        public AuthResponse(String token, User user) {
+            this.token = token;
+            this.user = user;
+        }
+
+        public String getToken() { return token; }
+        public User getUser() { return user; }
     }
 }
