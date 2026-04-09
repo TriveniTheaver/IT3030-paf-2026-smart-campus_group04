@@ -3,7 +3,13 @@ package com.smartcampus.incidents.model;
 import com.smartcampus.core.model.User;
 import com.smartcampus.facilities.model.Resource;
 import jakarta.persistence.*;
-import lombok.*;
+import lombok.AccessLevel;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import lombok.Setter;
+import org.hibernate.annotations.Formula;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -57,6 +63,11 @@ public class Ticket {
     private LocalDateTime createdAt;
     
     private String resolutionNotes;
+
+    /** Computed in SQL when tickets are loaded; not a column on `tickets`. */
+    @Formula("(SELECT COUNT(*) FROM ticket_comments tc WHERE tc.ticket_id = id)")
+    @Setter(AccessLevel.NONE)
+    private Long commentCount;
 
     @PrePersist
     protected void onCreate() {

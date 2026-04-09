@@ -5,6 +5,7 @@ import {
   ArrowRight,
   ArrowUpDown,
   Check,
+  ChevronDown,
   Image as ImageIcon,
   Mail,
   MessageSquare,
@@ -44,6 +45,16 @@ const TICKET_STATUS_CHIPS = [
   { id: 'CLOSED', label: 'Closed' },
   { id: 'REJECTED', label: 'Rejected' },
 ];
+
+/** Report categories from the new-incident form; extras appear if legacy data uses other labels. */
+const USER_INCIDENT_CATEGORY_PRESETS = ['Hardware', 'Software', 'Facility', 'General'];
+
+function ticketCommentCount(ticket) {
+  const raw =
+    ticket?.commentCount ?? ticket?.comment_count ?? ticket?.comments?.length;
+  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : Number(raw);
+  return Number.isFinite(n) ? n : 0;
+}
 
 const SORT_FIELDS = [
   { id: 'DATE', label: 'Date' },
@@ -182,16 +193,75 @@ const IncidentsDashboard = () => {
   const isTechnician = currentUser?.role === 'TECHNICIAN';
 
   const [ticketStatusFilter, setTicketStatusFilter] = useState('ALL');
+  /** @type {'ALL' | string} */
+  const [userCategoryFilter, setUserCategoryFilter] = useState('ALL');
   const [sortMenuOpen, setSortMenuOpen] = useState(false);
   const [sortBy, setSortBy] = useState('DATE');
   const [sortDir, setSortDir] = useState('DESC');
   const sortDropdownRef = useRef(null);
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const categoryMenuRef = useRef(null);
+
+  /** Categories for student dropdown: presets + any labels seen on tickets. */
+  const userCategoryDropdownIds = useMemo(() => {
+    if (!isUser) return [];
+    const fromTickets = [
+      ...new Set((tickets ?? []).map((t) => (t.category || 'General').trim()).filter(Boolean)),
+    ];
+    const merged = new Set(['ALL', ...USER_INCIDENT_CATEGORY_PRESETS, ...fromTickets]);
+    const rest = [...merged].filter((id) => id !== 'ALL').sort((a, b) => a.localeCompare(b));
+    return ['ALL', ...rest];
+  }, [isUser, tickets]);
+
+  const userCategoryDropdownOptions = useMemo(() => {
+    if (!isUser) return [];
+    const list = tickets ?? [];
+    return userCategoryDropdownIds.map((id) => {
+      if (id === 'ALL') {
+        return {
+          id,
+          label: 'All categories',
+          total: list.length,
+          newCount: list.filter((t) => t.status === 'OPEN').length,
+        };
+      }
+      const inCat = list.filter((t) => (t.category || 'General') === id);
+      return {
+        id,
+        label: id,
+        total: inCat.length,
+        newCount: inCat.filter((t) => t.status === 'OPEN').length,
+      };
+    });
+  }, [isUser, tickets, userCategoryDropdownIds]);
+
+  /** Tickets after category filter only — used to compute status chip counts. */
+  const ticketsScopedByCategoryOnly = useMemo(() => {
+    if (!tickets?.length) return [];
+    if (!isUser || userCategoryFilter === 'ALL') return tickets;
+    return tickets.filter((t) => (t.category || 'General') === userCategoryFilter);
+  }, [tickets, isUser, userCategoryFilter]);
+
+  const statusChipCounts = useMemo(() => {
+    const list = ticketsScopedByCategoryOnly;
+    /** @type {Record<string, number>} */
+    const counts = { ALL: list.length };
+    TICKET_STATUS_CHIPS.forEach((c) => {
+      if (c.id === 'ALL') return;
+      counts[c.id] = list.filter((t) => t.status === c.id).length;
+    });
+    return counts;
+  }, [ticketsScopedByCategoryOnly]);
 
   const filteredTickets = useMemo(() => {
     if (!tickets?.length) return [];
-    if (ticketStatusFilter === 'ALL') return tickets;
-    return tickets.filter((t) => t.status === ticketStatusFilter);
-  }, [tickets, ticketStatusFilter]);
+    let list = tickets;
+    if (isUser && userCategoryFilter !== 'ALL') {
+      list = list.filter((t) => (t.category || 'General') === userCategoryFilter);
+    }
+    if (ticketStatusFilter === 'ALL') return list;
+    return list.filter((t) => t.status === ticketStatusFilter);
+  }, [tickets, ticketStatusFilter, isUser, userCategoryFilter]);
 
   const displayedTickets = useMemo(
     () => sortTicketsCopy(filteredTickets, sortBy, sortDir),
@@ -238,7 +308,7 @@ const IncidentsDashboard = () => {
         : avgHoursClosedMonth >= 48
           ? `${(avgHoursClosedMonth / 24).toFixed(1)}d`
           : `${avgHoursClosedMonth.toFixed(1)}h`;
-    const commentsAdded = list.reduce((acc, t) => acc + (t.comments?.length ?? 0), 0);
+    const commentsAdded = list.reduce((acc, t) => acc + ticketCommentCount(t), 0);
     const displayName = (currentUser?.name ?? '').trim() || currentUser?.email || 'Technician';
     const welcomeLine = `Welcome back, ${displayName} · ${format(now, 'MMM d, yyyy')}`;
 
@@ -310,6 +380,17 @@ const IncidentsDashboard = () => {
     return () => document.removeEventListener('mousedown', close);
   }, [sortMenuOpen]);
 
+  useEffect(() => {
+    if (!categoryMenuOpen) return undefined;
+    const close = (e) => {
+      if (categoryMenuRef.current && !categoryMenuRef.current.contains(e.target)) {
+        setCategoryMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', close);
+    return () => document.removeEventListener('mousedown', close);
+  }, [categoryMenuOpen]);
+
   const pageCopy = useMemo(() => {
     if (isAdmin) {
       return {
@@ -332,22 +413,37 @@ const IncidentsDashboard = () => {
     };
   }, [isAdmin, isTechnician]);
 
-  const fetchTickets = useCallback(async () => {
-    if (!currentUser?.role) return;
-    setLoading(true);
-    try {
-      let url = '/api/tickets';
-      if (isTechnician) url = '/api/tickets/assigned-to-me';
-      else if (isUser) url = '/api/tickets/mine';
-      const res = await axios.get(url);
-      setTickets(res.data);
-    } catch (err) {
-      console.error(err);
-      setTickets([]);
-    } finally {
-      setLoading(false);
-    }
-  }, [currentUser?.role, isTechnician, isUser]);
+  const fetchTickets = useCallback(
+    async (opts = {}) => {
+      const silent = opts.silent === true;
+      if (!currentUser?.role) return null;
+      if (!silent) setLoading(true);
+      try {
+        let url = '/api/tickets';
+        if (isTechnician) url = '/api/tickets/assigned-to-me';
+        else if (isUser) url = '/api/tickets/mine';
+        const res = await axios.get(url);
+        setTickets(res.data);
+        return res.data;
+      } catch (err) {
+        console.error(err);
+        setTickets([]);
+        return null;
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [currentUser?.role, isTechnician, isUser]
+  );
+
+  const refetchTicketsSilentAndSyncDetail = useCallback(async () => {
+    const list = await fetchTickets({ silent: true });
+    if (!list) return;
+    setSelectedTicket((prev) => {
+      if (!prev) return null;
+      return list.find((t) => t.id === prev.id) ?? prev;
+    });
+  }, [fetchTickets]);
 
   const fetchTechnicians = useCallback(async () => {
     try {
@@ -488,7 +584,8 @@ const IncidentsDashboard = () => {
     try {
       await axios.post(`/api/tickets/${selectedTicket.id}/comments`, { content: newComment });
       setNewComment('');
-      fetchComments(selectedTicket.id);
+      await fetchComments(selectedTicket.id);
+      await refetchTicketsSilentAndSyncDetail();
     } catch (err) {
       const msg = err.response?.data;
       alert(typeof msg === 'string' ? msg : 'Failed to post comment');
@@ -530,7 +627,8 @@ const IncidentsDashboard = () => {
         setEditingCommentId(null);
         setEditDraft('');
       }
-      fetchComments(selectedTicket.id);
+      await fetchComments(selectedTicket.id);
+      await refetchTicketsSilentAndSyncDetail();
     } catch (err) {
       const msg = err.response?.data;
       alert(typeof msg === 'string' ? msg : 'Failed to delete comment');
@@ -690,8 +788,8 @@ const IncidentsDashboard = () => {
                     type="button"
                     onClick={() => handleContactModeChange('phone')}
                     className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 px-3 text-sm font-semibold transition-all ${contactMode === 'phone'
-                        ? 'bg-sliit-navy text-white shadow-md'
-                        : 'text-slate-600 hover:bg-white/80'
+                      ? 'bg-sliit-navy text-white shadow-md'
+                      : 'text-slate-600 hover:bg-white/80'
                       }`}
                   >
                     <Phone size={18} strokeWidth={2.25} aria-hidden />
@@ -701,8 +799,8 @@ const IncidentsDashboard = () => {
                     type="button"
                     onClick={() => handleContactModeChange('email')}
                     className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 px-3 text-sm font-semibold transition-all ${contactMode === 'email'
-                        ? 'bg-sliit-navy text-white shadow-md'
-                        : 'text-slate-600 hover:bg-white/80'
+                      ? 'bg-sliit-navy text-white shadow-md'
+                      : 'text-slate-600 hover:bg-white/80'
                       }`}
                   >
                     <Mail size={18} strokeWidth={2.25} aria-hidden />
@@ -719,10 +817,10 @@ const IncidentsDashboard = () => {
                       setFormData({ ...formData, preferredContact: e.target.value })
                     }
                     className={`w-full rounded-2xl border-2 bg-slate-50 p-4 pr-12 font-semibold text-slate-800 outline-none transition-[border-color,box-shadow] placeholder:text-slate-400 focus:ring-2 ${formData.preferredContact.trim() === ''
-                        ? 'border-slate-100 focus:border-sliit-orange focus:ring-sliit-orange/20'
-                        : contactValidation.valid === true
-                          ? 'border-emerald-500 focus:border-emerald-600 focus:ring-emerald-500/25'
-                          : 'border-rose-500 focus:border-rose-600 focus:ring-rose-500/25'
+                      ? 'border-slate-100 focus:border-sliit-orange focus:ring-sliit-orange/20'
+                      : contactValidation.valid === true
+                        ? 'border-emerald-500 focus:border-emerald-600 focus:ring-emerald-500/25'
+                        : 'border-rose-500 focus:border-rose-600 focus:ring-rose-500/25'
                       }`}
                     placeholder={contactPlaceholder}
                     aria-invalid={contactValidation.valid === false}
@@ -865,28 +963,102 @@ const IncidentsDashboard = () => {
         ) : (
           <>
             <div className="mb-8 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6">
-              <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-                {TICKET_STATUS_CHIPS.map((chip) => (
+              <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-start sm:gap-4">
+                {isUser ? (
+                  <div className="relative shrink-0 z-20" ref={categoryMenuRef}>
+                    <p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:sr-only">
+                      Category
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setCategoryMenuOpen((o) => !o)}
+                      className={`inline-flex w-full min-w-[12rem] max-w-full items-center justify-between gap-2 rounded-xl border px-4 py-2.5 text-left text-xs font-semibold transition-all sm:w-auto sm:min-w-[14rem] ${categoryMenuOpen
+                        ? 'border-sliit-orange bg-orange-50 text-slate-900 shadow-sm ring-1 ring-sliit-orange/25'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                        }`}
+                      aria-expanded={categoryMenuOpen}
+                      aria-haspopup="listbox"
+                      aria-label="Filter by category"
+                    >
+                      <span className="min-w-0 truncate">
+                        {userCategoryDropdownOptions.find((o) => o.id === userCategoryFilter)?.label ??
+                          'All categories'}
+                      </span>
+                      <ChevronDown
+                        size={16}
+                        strokeWidth={2.25}
+                        className={`shrink-0 text-slate-500 transition-transform ${categoryMenuOpen ? 'rotate-180' : ''}`}
+                        aria-hidden
+                      />
+                    </button>
+                    {categoryMenuOpen ? (
+                      <div
+                        className="absolute left-0 top-full z-40 mt-1.5 w-[min(100vw-2rem,20rem)] max-h-[min(70vh,22rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-xl"
+                        role="listbox"
+                        aria-label="Categories"
+                      >
+                        {userCategoryDropdownOptions.map((opt) => (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            role="option"
+                            aria-selected={userCategoryFilter === opt.id}
+                            onClick={() => {
+                              setUserCategoryFilter(opt.id);
+                              setCategoryMenuOpen(false);
+                            }}
+                            className={`flex w-full flex-col items-start gap-0.5 px-4 py-2.5 text-left text-xs transition-colors ${userCategoryFilter === opt.id
+                              ? 'bg-sliit-navy/5 font-semibold text-sliit-navy'
+                              : 'font-medium text-slate-700 hover:bg-slate-50'
+                              }`}
+                          >
+                            <span>{opt.label}</span>
+                            <span className="text-[11px] font-normal text-slate-500">
+                              {opt.total} ticket{opt.total === 1 ? '' : 's'}
+                              {opt.newCount > 0 ? (
+                                <span className="text-sliit-orange"> · {opt.newCount} open</span>
+                              ) : null}
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                  <span className="hidden w-full text-[10px] font-semibold uppercase tracking-wider text-slate-500 sm:mb-0 sm:inline sm:w-auto sm:mr-1">
+                    Status
+                  </span>
+                {TICKET_STATUS_CHIPS.map((chip) => {
+                  const n = statusChipCounts[chip.id] ?? 0;
+                  return (
                   <button
                     key={chip.id}
                     type="button"
                     onClick={() => setTicketStatusFilter(chip.id)}
                     className={`rounded-full px-3.5 py-2 text-xs font-semibold border transition-all ${ticketStatusFilter === chip.id
-                        ? 'border-sliit-navy bg-sliit-navy text-white shadow-sm'
-                        : 'border-slate-200 bg-white text-slate-600 hover:border-sliit-orange/40 hover:text-slate-900'
+                      ? 'border-sliit-navy bg-sliit-navy text-white shadow-sm'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-sliit-orange/40 hover:text-slate-900'
                       }`}
                   >
-                    {chip.label}
+                    <span>{chip.label}</span>
+                    <span
+                      className={`ml-1 tabular-nums ${ticketStatusFilter === chip.id ? 'text-white/90' : 'text-slate-400'}`}
+                    >
+                      ({n})
+                    </span>
                   </button>
-                ))}
+                  );
+                })}
+                </div>
               </div>
               <div className="relative shrink-0 self-end sm:self-center" ref={sortDropdownRef}>
                 <button
                   type="button"
                   onClick={() => setSortMenuOpen((o) => !o)}
                   className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${sortMenuOpen
-                      ? 'border-sliit-navy bg-slate-50 text-sliit-navy shadow-sm'
-                      : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    ? 'border-sliit-navy bg-slate-50 text-sliit-navy shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
                     }`}
                   aria-expanded={sortMenuOpen}
                   aria-haspopup="listbox"
@@ -908,8 +1080,8 @@ const IncidentsDashboard = () => {
                           type="button"
                           onClick={() => setSortBy(opt.id)}
                           className={`rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors ${sortBy === opt.id
-                              ? 'bg-sliit-navy text-white'
-                              : 'text-slate-700 hover:bg-slate-100'
+                            ? 'bg-sliit-navy text-white'
+                            : 'text-slate-700 hover:bg-slate-100'
                             }`}
                         >
                           {opt.label}
@@ -923,8 +1095,8 @@ const IncidentsDashboard = () => {
                         type="button"
                         onClick={() => setSortDir('ASC')}
                         className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${sortDir === 'ASC'
-                            ? 'bg-slate-800 text-white'
-                            : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          ? 'bg-slate-800 text-white'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                           }`}
                       >
                         Ascending
@@ -933,8 +1105,8 @@ const IncidentsDashboard = () => {
                         type="button"
                         onClick={() => setSortDir('DESC')}
                         className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${sortDir === 'DESC'
-                            ? 'bg-slate-800 text-white'
-                            : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                          ? 'bg-slate-800 text-white'
+                          : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                           }`}
                       >
                         Descending
@@ -948,7 +1120,11 @@ const IncidentsDashboard = () => {
             {filteredTickets.length === 0 ? (
               <div className="p-12 text-center rounded-3xl border border-dashed border-slate-200 bg-white">
                 <p className="sc-section-title text-slate-700 mb-1">No tickets match this filter</p>
-                <p className="sc-meta text-slate-500">Try another status or choose &quot;All tickets&quot;.</p>
+                <p className="sc-meta text-slate-500">
+                  {isUser
+                    ? 'Try another category from the menu, another status chip, or reset to All categories and All tickets.'
+                    : 'Try another status or choose "All tickets".'}
+                </p>
               </div>
             ) : (
               <div className="space-y-3">
@@ -1030,7 +1206,7 @@ const IncidentsDashboard = () => {
                           <div className="flex flex-wrap items-center gap-4 text-[11px] font-medium text-slate-500">
                             <span className="inline-flex items-center gap-1">
                               <MessageSquare size={13} className="text-sliit-orange" strokeWidth={2} />
-                              {ticket.comments?.length ?? 0} comments
+                              {ticketCommentCount(ticket)} comments
                             </span>
                             <span
                               className={`inline-flex items-center gap-1 ${fileCount > 0 ? 'font-semibold text-amber-600' : 'text-slate-400'
