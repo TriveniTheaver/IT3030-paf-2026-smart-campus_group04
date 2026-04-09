@@ -4,9 +4,12 @@ import {
   AlertTriangle,
   ArrowRight,
   ArrowUpDown,
-  MessageSquare,
+  Check,
   Image as ImageIcon,
+  Mail,
+  MessageSquare,
   Pencil,
+  Phone,
   Shield,
   Trash2,
   Upload,
@@ -41,6 +44,32 @@ const SORT_FIELDS = [
 ];
 
 const PRIORITY_ORDER = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+
+const EMAIL_PATTERN = /^[a-zA-Z0-9_+&.-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+/**
+ * @returns {{ valid: boolean | null, message: string }} valid null = optional empty field
+ */
+function validatePreferredContact(mode, raw) {
+  const trimmed = (raw ?? '').trim();
+  if (trimmed === '') {
+    return { valid: null, message: '' };
+  }
+  if (mode === 'phone') {
+    const digits = trimmed.replace(/\D/g, '');
+    if (digits.length !== 10) {
+      return { valid: false, message: 'Must be exactly 10 digits.' };
+    }
+    if (!digits.startsWith('07')) {
+      return { valid: false, message: 'Must start with 07.' };
+    }
+    return { valid: true, message: '' };
+  }
+  if (EMAIL_PATTERN.test(trimmed)) {
+    return { valid: true, message: '' };
+  }
+  return { valid: false, message: 'Enter a valid email address.' };
+}
 
 function sortTicketsCopy(list, sortBy, sortDir) {
   const mul = sortDir === 'ASC' ? 1 : -1;
@@ -119,6 +148,8 @@ const IncidentsDashboard = () => {
     description: '',
     preferredContact: '',
   });
+  /** @type {'phone' | 'email'} */
+  const [contactMode, setContactMode] = useState('phone');
   const [attachmentFiles, setAttachmentFiles] = useState([]);
   const [attachmentPreviewUrls, setAttachmentPreviewUrls] = useState([]);
   const attachmentInputRef = useRef(null);
@@ -151,6 +182,19 @@ const IncidentsDashboard = () => {
     () => sortTicketsCopy(filteredTickets, sortBy, sortDir),
     [filteredTickets, sortBy, sortDir]
   );
+
+  const contactValidation = useMemo(
+    () => validatePreferredContact(contactMode, formData.preferredContact),
+    [contactMode, formData.preferredContact]
+  );
+
+  const contactPlaceholder =
+    contactMode === 'phone' ? '07X XXX XXXX' : 'name@faculty.sliit.lk';
+
+  const handleContactModeChange = (mode) => {
+    setContactMode(mode);
+    setFormData((prev) => ({ ...prev, preferredContact: '' }));
+  };
 
   useEffect(() => {
     if (!sortMenuOpen) return undefined;
@@ -267,6 +311,10 @@ const IncidentsDashboard = () => {
       alert('Please choose a facility or resource.');
       return;
     }
+    if (contactValidation.valid === false) {
+      alert(contactValidation.message || 'Please fix preferred contact.');
+      return;
+    }
     if (attachmentFiles.length > 3) {
       alert('You can attach at most 3 images.');
       return;
@@ -287,6 +335,7 @@ const IncidentsDashboard = () => {
         description: '',
         preferredContact: '',
       });
+      setContactMode('phone');
       setAttachmentFiles([]);
       if (attachmentInputRef.current) attachmentInputRef.current.value = '';
       setShowForm(false);
@@ -526,14 +575,75 @@ const IncidentsDashboard = () => {
               </div>
 
               <div>
-                <label className={FORM_LABEL}>Preferred contact</label>
-                <input
-                  type="text"
-                  value={formData.preferredContact}
-                  onChange={(e) => setFormData({ ...formData, preferredContact: e.target.value })}
-                  className="w-full bg-slate-50 border-slate-100 rounded-2xl p-4 border font-semibold text-slate-800 outline-none placeholder:text-slate-400"
-                  placeholder="Phone or email"
-                />
+                <label className={FORM_LABEL} id="preferred-contact-label">
+                  Preferred contact
+                </label>
+                <div
+                  className="mb-2 flex rounded-2xl border border-slate-200 bg-slate-100/90 p-1 gap-1"
+                  role="group"
+                  aria-labelledby="preferred-contact-label"
+                >
+                  <button
+                    type="button"
+                    onClick={() => handleContactModeChange('phone')}
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 px-3 text-sm font-semibold transition-all ${
+                      contactMode === 'phone'
+                        ? 'bg-sliit-navy text-white shadow-md'
+                        : 'text-slate-600 hover:bg-white/80'
+                    }`}
+                  >
+                    <Phone size={18} strokeWidth={2.25} aria-hidden />
+                    Phone
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleContactModeChange('email')}
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 px-3 text-sm font-semibold transition-all ${
+                      contactMode === 'email'
+                        ? 'bg-sliit-navy text-white shadow-md'
+                        : 'text-slate-600 hover:bg-white/80'
+                    }`}
+                  >
+                    <Mail size={18} strokeWidth={2.25} aria-hidden />
+                    Email
+                  </button>
+                </div>
+                <div className="relative">
+                  <input
+                    type={contactMode === 'email' ? 'email' : 'text'}
+                    inputMode={contactMode === 'phone' ? 'tel' : 'email'}
+                    autoComplete={contactMode === 'phone' ? 'tel' : 'email'}
+                    value={formData.preferredContact}
+                    onChange={(e) =>
+                      setFormData({ ...formData, preferredContact: e.target.value })
+                    }
+                    className={`w-full rounded-2xl border-2 bg-slate-50 p-4 pr-12 font-semibold text-slate-800 outline-none transition-[border-color,box-shadow] placeholder:text-slate-400 focus:ring-2 ${
+                      formData.preferredContact.trim() === ''
+                        ? 'border-slate-100 focus:border-sliit-orange focus:ring-sliit-orange/20'
+                        : contactValidation.valid === true
+                          ? 'border-emerald-500 focus:border-emerald-600 focus:ring-emerald-500/25'
+                          : 'border-rose-500 focus:border-rose-600 focus:ring-rose-500/25'
+                    }`}
+                    placeholder={contactPlaceholder}
+                    aria-invalid={contactValidation.valid === false}
+                    aria-describedby="preferred-contact-feedback"
+                  />
+                  {contactValidation.valid === true ? (
+                    <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-emerald-600">
+                      <Check size={22} strokeWidth={2.5} aria-hidden />
+                      <span className="sr-only">Valid</span>
+                    </span>
+                  ) : null}
+                </div>
+                <p
+                  id="preferred-contact-feedback"
+                  className={`mt-2 min-h-[1.25rem] text-xs font-medium ${
+                    contactValidation.valid === false ? 'text-rose-600' : 'text-transparent'
+                  }`}
+                  aria-live="polite"
+                >
+                  {contactValidation.valid === false ? contactValidation.message : '\u00A0'}
+                </p>
               </div>
 
               <div>
