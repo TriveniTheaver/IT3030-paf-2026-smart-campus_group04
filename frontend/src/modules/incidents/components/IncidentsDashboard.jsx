@@ -224,13 +224,30 @@ const IncidentsDashboard = () => {
   };
 
   const onAttachmentFilesChange = (e) => {
-    const list = Array.from(e.target.files || []);
-    if (list.length > 3) {
-      alert('You can attach at most 3 images.');
-      e.target.value = '';
-      return;
-    }
-    setAttachmentFiles(list);
+    const picked = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (picked.length === 0) return;
+
+    setAttachmentFiles((prev) => {
+      const combined = [...prev, ...picked];
+      const seen = new Set();
+      const out = [];
+      for (const f of combined) {
+        const k = `${f.name}|${f.size}|${f.lastModified}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        out.push(f);
+        if (out.length === 3) break;
+      }
+      if (combined.length > out.length) {
+        queueMicrotask(() =>
+          alert(
+            'Maximum 3 images. Extra files were skipped.\n\nTip: in the file dialog use Ctrl+click (Windows) or Cmd+click (Mac) to select several files at once — or add more using “Choose file” again.'
+          )
+        );
+      }
+      return out;
+    });
   };
 
   const removeAttachmentAt = (index) => {
@@ -445,7 +462,9 @@ const IncidentsDashboard = () => {
               <div>
                 <label className="block sc-label mb-2">Evidence images (max 3)</label>
                 <p className="sc-meta text-slate-500 text-xs mb-2">
-                  JPEG, PNG, GIF, or WebP — up to 5 MB each. Files are stored securely on the server.
+                  JPEG, PNG, GIF, or WebP — up to 5 MB each. Up to 3 images total. In the file window,{' '}
+                  <strong>Ctrl+click</strong> (Windows) or <strong>Cmd+click</strong> (Mac) to select multiple, or use
+                  Choose file again to add more (until you reach 3).
                 </p>
                 <input
                   ref={attachmentInputRef}
@@ -458,7 +477,7 @@ const IncidentsDashboard = () => {
                 {attachmentFiles.length > 0 ? (
                   <div className="mt-4 grid grid-cols-3 gap-2">
                     {attachmentFiles.map((file, i) => (
-                      <div key={`${file.name}-${i}`} className="relative group">
+                      <div key={`${file.name}-${file.size}-${file.lastModified}-${i}`} className="relative group">
                         <div className="aspect-square rounded-xl overflow-hidden border border-slate-200 bg-slate-50">
                           <img
                             src={attachmentPreviewUrls[i] || ''}
