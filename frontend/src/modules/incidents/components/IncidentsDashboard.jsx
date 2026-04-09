@@ -13,10 +13,17 @@ import {
   Shield,
   Trash2,
   Upload,
-  Wrench,
 } from 'lucide-react';
-import { format } from 'date-fns';
+import {
+  format,
+  startOfWeek,
+  differenceInHours,
+  isSameMonth,
+  isToday,
+  isYesterday,
+} from 'date-fns';
 import axios from 'axios';
+import TechnicianDashboardOverview from './technician/TechnicianDashboardOverview';
 
 const ADMIN_TRIAGE_STATUSES = [
   { value: 'REJECTED', label: 'Rejected — invalid or duplicate request' },
@@ -46,6 +53,14 @@ const SORT_FIELDS = [
 const PRIORITY_ORDER = { HIGH: 3, MEDIUM: 2, LOW: 1 };
 
 const EMAIL_PATTERN = /^[a-zA-Z0-9_+&.-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+
+const TECH_SLA_BREACH_HOURS = 72;
+
+function truncateTicketText(str, max = 44) {
+  const s = (str ?? '').trim();
+  if (!s) return '—';
+  return s.length <= max ? s : `${s.slice(0, max - 1)}…`;
+}
 
 /**
  * @returns {{ valid: boolean | null, message: string }} valid null = optional empty field
@@ -188,8 +203,96 @@ const IncidentsDashboard = () => {
     [contactMode, formData.preferredContact]
   );
 
+  const technicianOverview = useMemo(() => {
+    if (!isTechnician) return null;
+    const list = tickets ?? [];
+    const now = new Date();
+    const weekStart = startOfWeek(now, { weekStartsOn: 1 });
+    const assigned = list.length;
+    const inProgress = list.filter((t) => t.status === 'IN_PROGRESS').length;
+    const slaBreached = list.filter(
+      (t) =>
+        (t.status === 'OPEN' || t.status === 'IN_PROGRESS') &&
+        differenceInHours(now, new Date(t.createdAt)) > TECH_SLA_BREACH_HOURS
+    ).length;
+    const resolvedThisWeek = list.filter((t) => {
+      if (t.status !== 'RESOLVED' && t.status !== 'CLOSED') return false;
+      return new Date(t.createdAt) >= weekStart;
+    }).length;
+    const activeOpen = list.filter((t) => t.status === 'OPEN' || t.status === 'IN_PROGRESS').length;
+    const slaCompliancePct =
+      activeOpen === 0 ? 100 : Math.max(0, Math.min(100, Math.round(100 * (1 - slaBreached / activeOpen))));
+    const closedThisMonth = list.filter(
+      (t) =>
+        (t.status === 'RESOLVED' || t.status === 'CLOSED') &&
+        isSameMonth(new Date(t.createdAt), now)
+    );
+    const avgHoursClosedMonth =
+      closedThisMonth.length === 0
+        ? null
+        : closedThisMonth.reduce((s, t) => s + differenceInHours(now, new Date(t.createdAt)), 0) /
+        closedThisMonth.length;
+    const avgResolutionLabel =
+      avgHoursClosedMonth == null
+        ? '—'
+        : avgHoursClosedMonth >= 48
+          ? `${(avgHoursClosedMonth / 24).toFixed(1)}d`
+          : `${avgHoursClosedMonth.toFixed(1)}h`;
+    const commentsAdded = list.reduce((acc, t) => acc + (t.comments?.length ?? 0), 0);
+    const displayName = (currentUser?.name ?? '').trim() || currentUser?.email || 'Technician';
+    const welcomeLine = `Welcome back, ${displayName} · ${format(now, 'MMM d, yyyy')}`;
+
+    const sorted = [...list].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+    const activityItems = sorted.slice(0, 5).map((t) => {
+      const resName = t.resource?.name || 'Resource';
+      const d = new Date(t.createdAt);
+      const meta = isToday(d)
+        ? `Today · ${format(d, 'h:mm a')}`
+        : isYesterday(d)
+          ? `Yesterday · ${format(d, 'h:mm a')}`
+          : format(d, 'MMM d · h:mm a');
+      if (t.status === 'RESOLVED' || t.status === 'CLOSED') {
+        return {
+          dotClassName: 'bg-emerald-500',
+          title: `Resolved #${t.id} · ${truncateTicketText(t.description)} · ${resName}`,
+          meta,
+        };
+      }
+      if (t.status === 'IN_PROGRESS') {
+        return {
+          dotClassName: 'bg-amber-500',
+          title: `In progress on #${t.id} · ${resName}`,
+          meta,
+        };
+      }
+      return {
+        dotClassName: 'bg-sky-500',
+        title: `Ticket #${t.id} · ${t.category || 'Issue'} · ${resName}`,
+        meta,
+      };
+    });
+
+    return {
+      welcomeLine,
+      metrics: { assigned, inProgress, slaBreached, resolvedThisWeek },
+      myStatsRows: [
+        { label: 'Avg. resolution time', value: avgResolutionLabel },
+        { label: 'Tickets resolved', value: String(closedThisMonth.length) },
+        {
+          label: 'SLA compliance',
+          value: `${slaCompliancePct}%`,
+          valueClassName: 'text-emerald-600',
+        },
+        { label: 'Comments added', value: String(commentsAdded) },
+      ],
+      activityItems,
+    };
+  }, [isTechnician, tickets, currentUser?.name, currentUser?.email]);
+
   const contactPlaceholder =
-    contactMode === 'phone' ? '07X XXX XXXX' : 'name@faculty.sliit.lk';
+    contactMode === 'phone' ? '07X XXX XXXX' : 'StudentNumber@.sliit.lk';
 
   const handleContactModeChange = (mode) => {
     setContactMode(mode);
@@ -586,11 +689,10 @@ const IncidentsDashboard = () => {
                   <button
                     type="button"
                     onClick={() => handleContactModeChange('phone')}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 px-3 text-sm font-semibold transition-all ${
-                      contactMode === 'phone'
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 px-3 text-sm font-semibold transition-all ${contactMode === 'phone'
                         ? 'bg-sliit-navy text-white shadow-md'
                         : 'text-slate-600 hover:bg-white/80'
-                    }`}
+                      }`}
                   >
                     <Phone size={18} strokeWidth={2.25} aria-hidden />
                     Phone
@@ -598,11 +700,10 @@ const IncidentsDashboard = () => {
                   <button
                     type="button"
                     onClick={() => handleContactModeChange('email')}
-                    className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 px-3 text-sm font-semibold transition-all ${
-                      contactMode === 'email'
+                    className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-3 px-3 text-sm font-semibold transition-all ${contactMode === 'email'
                         ? 'bg-sliit-navy text-white shadow-md'
                         : 'text-slate-600 hover:bg-white/80'
-                    }`}
+                      }`}
                   >
                     <Mail size={18} strokeWidth={2.25} aria-hidden />
                     Email
@@ -617,13 +718,12 @@ const IncidentsDashboard = () => {
                     onChange={(e) =>
                       setFormData({ ...formData, preferredContact: e.target.value })
                     }
-                    className={`w-full rounded-2xl border-2 bg-slate-50 p-4 pr-12 font-semibold text-slate-800 outline-none transition-[border-color,box-shadow] placeholder:text-slate-400 focus:ring-2 ${
-                      formData.preferredContact.trim() === ''
+                    className={`w-full rounded-2xl border-2 bg-slate-50 p-4 pr-12 font-semibold text-slate-800 outline-none transition-[border-color,box-shadow] placeholder:text-slate-400 focus:ring-2 ${formData.preferredContact.trim() === ''
                         ? 'border-slate-100 focus:border-sliit-orange focus:ring-sliit-orange/20'
                         : contactValidation.valid === true
                           ? 'border-emerald-500 focus:border-emerald-600 focus:ring-emerald-500/25'
                           : 'border-rose-500 focus:border-rose-600 focus:ring-rose-500/25'
-                    }`}
+                      }`}
                     placeholder={contactPlaceholder}
                     aria-invalid={contactValidation.valid === false}
                     aria-describedby="preferred-contact-feedback"
@@ -637,9 +737,8 @@ const IncidentsDashboard = () => {
                 </div>
                 <p
                   id="preferred-contact-feedback"
-                  className={`mt-2 min-h-[1.25rem] text-xs font-medium ${
-                    contactValidation.valid === false ? 'text-rose-600' : 'text-transparent'
-                  }`}
+                  className={`mt-2 min-h-[1.25rem] text-xs font-medium ${contactValidation.valid === false ? 'text-rose-600' : 'text-transparent'
+                    }`}
                   aria-live="polite"
                 >
                   {contactValidation.valid === false ? contactValidation.message : '\u00A0'}
@@ -717,25 +816,38 @@ const IncidentsDashboard = () => {
       ) : null}
 
       <div className={isUser ? 'w-full md:w-2/3' : 'w-full'}>
-        <div className="flex justify-between items-center mb-10">
-          <div>
-            <h1 className="sc-page-title text-slate-900 flex items-center gap-3">
-              {isAdmin ? <Shield className="text-sliit-orange shrink-0" size={32} /> : null}
-              {isTechnician ? <Wrench className="text-sliit-orange shrink-0" size={32} /> : null}
-              {pageCopy.title}
-            </h1>
-            <p className="text-slate-500 font-medium mt-2 max-w-2xl">{pageCopy.subtitle}</p>
+        {isTechnician && technicianOverview ? (
+          <div className="mb-10 rounded-3xl border border-slate-100 bg-white p-6 shadow-xl shadow-slate-200/50 md:p-8">
+            <TechnicianDashboardOverview
+              welcomeLine={technicianOverview.welcomeLine}
+              metrics={technicianOverview.metrics}
+              myStatsRows={technicianOverview.myStatsRows}
+              activityItems={technicianOverview.activityItems}
+            />
+            <p className="mt-6 border-t border-slate-100 pt-6 text-sm font-medium text-slate-500">
+              {pageCopy.subtitle}
+            </p>
           </div>
-          {isUser ? (
-            <button
-              type="button"
-              className="md:hidden px-6 py-3 bg-sliit-navy text-white font-semibold rounded-xl text-sm"
-              onClick={() => setShowForm(!showForm)}
-            >
-              {showForm ? 'View list' : '+ Report'}
-            </button>
-          ) : null}
-        </div>
+        ) : (
+          <div className="flex justify-between items-center mb-10">
+            <div>
+              <h1 className="sc-page-title text-slate-900 flex items-center gap-3">
+                {isAdmin ? <Shield className="text-sliit-orange shrink-0" size={32} /> : null}
+                {pageCopy.title}
+              </h1>
+              <p className="text-slate-500 font-medium mt-2 max-w-2xl">{pageCopy.subtitle}</p>
+            </div>
+            {isUser ? (
+              <button
+                type="button"
+                className="md:hidden px-6 py-3 bg-sliit-navy text-white font-semibold rounded-xl text-sm"
+                onClick={() => setShowForm(!showForm)}
+              >
+                {showForm ? 'View list' : '+ Report'}
+              </button>
+            ) : null}
+          </div>
+        )}
 
         {loading ? (
           <div className="p-32 text-center sc-meta text-slate-400 animate-pulse">Syncing tickets…</div>
@@ -759,11 +871,10 @@ const IncidentsDashboard = () => {
                     key={chip.id}
                     type="button"
                     onClick={() => setTicketStatusFilter(chip.id)}
-                    className={`rounded-full px-3.5 py-2 text-xs font-semibold border transition-all ${
-                      ticketStatusFilter === chip.id
+                    className={`rounded-full px-3.5 py-2 text-xs font-semibold border transition-all ${ticketStatusFilter === chip.id
                         ? 'border-sliit-navy bg-sliit-navy text-white shadow-sm'
                         : 'border-slate-200 bg-white text-slate-600 hover:border-sliit-orange/40 hover:text-slate-900'
-                    }`}
+                      }`}
                   >
                     {chip.label}
                   </button>
@@ -773,11 +884,10 @@ const IncidentsDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setSortMenuOpen((o) => !o)}
-                  className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${
-                    sortMenuOpen
+                  className={`inline-flex items-center gap-2 rounded-full border px-4 py-2 text-xs font-semibold transition-all ${sortMenuOpen
                       ? 'border-sliit-navy bg-slate-50 text-sliit-navy shadow-sm'
                       : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                  }`}
+                    }`}
                   aria-expanded={sortMenuOpen}
                   aria-haspopup="listbox"
                 >
@@ -797,11 +907,10 @@ const IncidentsDashboard = () => {
                           key={opt.id}
                           type="button"
                           onClick={() => setSortBy(opt.id)}
-                          className={`rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors ${
-                            sortBy === opt.id
+                          className={`rounded-lg px-3 py-2 text-left text-xs font-medium transition-colors ${sortBy === opt.id
                               ? 'bg-sliit-navy text-white'
                               : 'text-slate-700 hover:bg-slate-100'
-                          }`}
+                            }`}
                         >
                           {opt.label}
                         </button>
@@ -813,22 +922,20 @@ const IncidentsDashboard = () => {
                       <button
                         type="button"
                         onClick={() => setSortDir('ASC')}
-                        className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
-                          sortDir === 'ASC'
+                        className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${sortDir === 'ASC'
                             ? 'bg-slate-800 text-white'
                             : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         Ascending
                       </button>
                       <button
                         type="button"
                         onClick={() => setSortDir('DESC')}
-                        className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
-                          sortDir === 'DESC'
+                        className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${sortDir === 'DESC'
                             ? 'bg-slate-800 text-white'
                             : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
-                        }`}
+                          }`}
                       >
                         Descending
                       </button>
@@ -852,8 +959,8 @@ const IncidentsDashboard = () => {
                     <div
                       key={ticket.id}
                       className={`group relative flex overflow-hidden rounded-xl border bg-white transition-all duration-200 ${isActive
-                          ? 'border-sliit-orange shadow-lg ring-2 ring-sliit-orange/30'
-                          : 'border-slate-100 shadow-sm hover:border-slate-200 hover:shadow-md'
+                        ? 'border-sliit-orange shadow-lg ring-2 ring-sliit-orange/30'
+                        : 'border-slate-100 shadow-sm hover:border-slate-200 hover:shadow-md'
                         }`}
                     >
                       <div
