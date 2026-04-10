@@ -67,6 +67,43 @@ Create/update bodies use `ResourceRequest` with server-side validation (name, ty
 
 - `backend/web-app/src/test/java/com/smartcampus/FacilitiesResourceApiIT.java` — public GET, invalid POST (400), authenticated admin POST (201).
 
+## Member 3 — Incident / maintenance ticketing (tickets, attachments, comments, technician workflow)
+
+Assignment alignment: **Module C** (incident tickets, evidence attachments, workflow, technician assignment, comments with ownership). This section lists **Member 3** API and UI ownership for individual marking.
+
+### REST API (base path `/api/tickets`)
+
+| Method | Path | What it does | Access / roles |
+|--------|------|----------------|----------------|
+| POST | `/api/tickets` | Create ticket (JSON body; optional attachment URL strings). | **USER** (`application/json`) |
+| POST | `/api/tickets` | Create ticket with up to **3** image uploads (`multipart/form-data`: `resourceId`, optional `category`, `priority`, `description`, `preferredContact`, repeated `files`). | **USER** (`multipart/form-data`) |
+| GET | `/api/tickets/files/{filename}` | Download stored evidence file (opaque UUID filename). | **Authenticated** (JWT) |
+| GET | `/api/tickets` | List **all** tickets (triage queue). | **ADMIN** |
+| GET | `/api/tickets/assigned-to-me` | List tickets assigned to the current technician. | **TECHNICIAN** |
+| GET | `/api/tickets/mine` | List tickets reported by the current user. | **USER** |
+| GET | `/api/tickets/user/{reporterId}` | List tickets by reporter id. | **ADMIN**, or **same user** as `reporterId` |
+| GET | `/api/tickets/{id}` | Get one ticket by id. | **Authenticated** if user may access that ticket (reporter, assignee, or **ADMIN**; otherwise **403**) |
+| PUT | `/api/tickets/{id}/status` | Update status / optional `resolutionNotes` (workflow rules enforced in service). | **ADMIN** or **TECHNICIAN** (technician only on **assigned** tickets) |
+| PUT | `/api/tickets/{id}/assign` | Assign a technician (`technicianId`). | **ADMIN** |
+| GET | `/api/tickets/{ticketId}/comments` | List comments on a ticket (oldest first). | **Authenticated** if user may access the ticket |
+| POST | `/api/tickets/{ticketId}/comments` | Add comment (`{ "content": "..." }`). | **Authenticated** if user may access the ticket |
+| PUT | `/api/tickets/{ticketId}/comments/{commentId}` | Edit comment (author only). | **Authenticated**; **403** if not author |
+| DELETE | `/api/tickets/{ticketId}/comments/{commentId}` | Delete comment (author only). | **Authenticated**; **204**; **403** if not author |
+
+**Related (not Member 3, but used by the UI):** `GET /api/facilities` (resource picker), `GET /api/users/technicians` (admin assign dropdown) — implemented in other modules.
+
+**Backend packages (Member 3):** `backend/incidents-module/` — `controller`, `service`, `model`, `repository`, `storage` (`TicketAttachmentStorageService`: image validation, size limits, safe filenames, disk storage under `app.ticket-upload.dir`).
+
+**Configuration:** `spring.servlet.multipart` and `app.ticket-upload.dir` in `backend/web-app/src/main/resources/application.yml` (and `application-mysql.yml`).
+
+### React UI (Member 3)
+
+| File | Role |
+|------|------|
+| `frontend/src/modules/incidents/components/IncidentsDashboard.jsx` | Full incidents experience: **USER** — report form (facility, category, priority, description, contact, **file upload** max 3 images with merge/replace UX); **ADMIN** — full queue, assign technician, triage statuses; **TECHNICIAN** — assigned queue, field status updates; ticket detail modal with description, **evidence images** (including authenticated blob load for uploaded files), **comment thread**, **inline edit/delete** for own comments. Includes helper **`AuthenticatedTicketImage`** (same file) for JWT-protected image URLs. |
+
+**Routing:** the incidents screen is mounted in `frontend/src/App.jsx` at route **`/incidents`** (`<IncidentsDashboard />`).
+
 ## GitHub Actions
 
 Workflow should run `mvn clean verify` on push/PR so the backend compiles and tests pass.

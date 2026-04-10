@@ -1,4 +1,8 @@
 spring:
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 20MB
   datasource:
     url: ${SMARTCAMPUS_DB_URL:jdbc:mysql://localhost:3306/smartcampus?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
     username: ${SMARTCAMPUS_DB_USERNAME:root}
@@ -13,3 +17,6 @@ spring:
     show-sql: true
     database-platform: org.hibernate.dialect.MySQLDialect
 
+app:
+  ticket-upload:
+    dir: ${user.dir}/data/ticket-uploads
