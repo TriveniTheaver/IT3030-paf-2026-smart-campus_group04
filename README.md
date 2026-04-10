@@ -95,12 +95,12 @@ New bookings are created with status PENDING. Business-rule failures (missing re
 
 **React UI**
 
-frontend/src/modules/bookings/components/BookingsDashboard.jsx — user: my bookings + cancel; admin: queue, filter by status, approve/reject with optional reason; entry points aligned with the API.
-frontend/src/modules/bookings/components/BookingModal.jsx — create/edit-style flow for submitting a booking (times, purpose, attendees) against a chosen resource.
+`frontend/src/modules/bookings/components/BookingsDashboard.jsx` — user: my bookings + cancel; admin: queue, filter by status, approve/reject with optional reason; entry points aligned with the API.
+`frontend/src/modules/bookings/components/BookingModal.jsx` — create/edit-style flow for submitting a booking (times, purpose, attendees) against a chosen resource.
 
 **Automated tests**
 
-The repo currently includes backend/web-app/src/test/java/com/smartcampus/FacilitiesResourceApiIT.java for facilities only. There is no dedicated booking integration test under web-app/src/test yet. A natural follow-up for Member 2 would be something like BookingsApiIT.java: e.g. POST without auth (401/403), POST as USER with overlapping slot (400), POST as USER with valid slot (200), PUT .../status as ADMIN for approve with conflict (400), etc.
+The repo currently includes `backend/web-app/src/test/java/com/smartcampus/FacilitiesResourceApiIT.java` for facilities only. There is no dedicated booking integration test under web-app/src/test yet. A natural follow-up for Member 2 would be something like BookingsApiIT.java: e.g. POST without auth (401/403), POST as USER with overlapping slot (400), POST as USER with valid slot (200), PUT .../status as ADMIN for approve with conflict (400), etc.
 
 ## GitHub Actions
 
