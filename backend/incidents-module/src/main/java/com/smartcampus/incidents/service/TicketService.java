@@ -12,9 +12,11 @@ import com.smartcampus.incidents.model.TicketStatus;
 import com.smartcampus.incidents.repository.CommentRepository;
 import com.smartcampus.incidents.repository.TicketRepository;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
@@ -32,6 +34,20 @@ public class TicketService {
     private static final Set<TicketStatus> ADMIN_TRIAGE_STATUSES = EnumSet.of(
             TicketStatus.REJECTED,
             TicketStatus.CLOSED
+    );
+
+    /** Tickets in these states are read-only for the comment thread (no add / edit / delete). */
+    private static final Set<TicketStatus> COMMENT_THREAD_LOCKED = EnumSet.of(
+            TicketStatus.RESOLVED,
+            TicketStatus.CLOSED,
+            TicketStatus.REJECTED
+    );
+
+    /** Assignment and admin triage are only for tickets still in the operational queue. */
+    private static final Set<TicketStatus> ADMIN_QUEUE_CLOSED = EnumSet.of(
+            TicketStatus.RESOLVED,
+            TicketStatus.CLOSED,
+            TicketStatus.REJECTED
     );
 
     @Autowired
@@ -126,6 +142,10 @@ public class TicketService {
         Role role = actor.getRole();
 
         if (role == Role.ADMIN) {
+            if (ticket.getStatus() != null && ADMIN_QUEUE_CLOSED.contains(ticket.getStatus())) {
+                throw new IllegalArgumentException(
+                        "This ticket is resolved, closed, or rejected; triage actions are not available.");
+            }
             if (!ADMIN_TRIAGE_STATUSES.contains(newStatus)) {
                 throw new IllegalArgumentException(
                         "Administrators triage the queue: reject invalid tickets or close them administratively. "
@@ -162,6 +182,10 @@ public class TicketService {
     public Ticket assignTicket(Long ticketId, Long technicianId) {
         Ticket ticket = ticketRepository.findById(ticketId)
                 .orElseThrow(() -> new IllegalArgumentException("Ticket not found"));
+        if (ticket.getStatus() != null && ADMIN_QUEUE_CLOSED.contains(ticket.getStatus())) {
+            throw new IllegalArgumentException(
+                    "Resolved or closed tickets cannot be reassigned.");
+        }
         User tech = userRepository.findById(technicianId)
                 .orElseThrow(() -> new IllegalArgumentException("Technician not found"));
         if (tech.getRole() != Role.TECHNICIAN) {
@@ -189,6 +213,13 @@ public class TicketService {
         return savedTicket;
     }
 
+    private void assertCommentThreadMutable(Ticket ticket) {
+        if (ticket.getStatus() != null && COMMENT_THREAD_LOCKED.contains(ticket.getStatus())) {
+            throw new IllegalArgumentException(
+                    "This ticket is resolved or closed; comments cannot be added or changed.");
+        }
+    }
+
     @Transactional
     public Comment addComment(Long ticketId, String content, User author) {
         if (content == null || content.isBlank()) {
@@ -199,6 +230,7 @@ public class TicketService {
         if (!canAccessTicket(author, ticket)) {
             throw new IllegalArgumentException("You cannot comment on this ticket");
         }
+        assertCommentThreadMutable(ticket);
 
         Comment comment = Comment.builder()
                 .ticket(ticket)
@@ -231,5 +263,44 @@ public class TicketService {
         }
 
         return savedComment;
+    }
+
+    @Transactional
+    public Comment updateComment(Long ticketId, Long commentId, String content, User actor) {
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("Comment cannot be empty");
+        }
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new IllegalArgumentException("Comment not found"));
+        if (!comment.getTicket().getId().equals(ticketId)) {
+            throw new IllegalArgumentException("Comment does not belong to this ticket");
+        }
+        if (!canAccessTicket(actor, comment.getTicket())) {
+            throw new AccessDeniedException("You cannot access this ticket");
+        }
+        assertCommentThreadMutable(comment.getTicket());
+        if (!comment.getAuthor().getId().equals(actor.getId())) {
+            throw new AccessDeniedException("Only the author can edit this comment");
+        }
+        comment.setContent(content.trim());
+        comment.setUpdatedAt(LocalDateTime.now());
+        return commentRepository.save(comment);
+    }
+
+    @Transactional
+    public void deleteComment(Long ticketId, Long commentId, User actor) {
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new IllegalArgumentException("Comment not found"));
+        if (!comment.getTicket().getId().equals(ticketId)) {
+            throw new IllegalArgumentException("Comment does not belong to this ticket");
+        }
+        if (!canAccessTicket(actor, comment.getTicket())) {
+            throw new AccessDeniedException("You cannot access this ticket");
+        }
+        assertCommentThreadMutable(comment.getTicket());
+        if (!comment.getAuthor().getId().equals(actor.getId())) {
+            throw new AccessDeniedException("Only the author can delete this comment");
+        }
+        commentRepository.delete(comment);
     }
 }

@@ -23,3 +23,6 @@ Thumbs.db
 # Local-only assets folder (kept in frontend/public instead)
 images/
 
+# Incident ticket uploads (server-side evidence files)
+**/data/ticket-uploads/
+

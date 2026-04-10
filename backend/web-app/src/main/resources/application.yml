@@ -23,6 +23,11 @@ spring:
     console:
       enabled: false
 
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 20MB
+
   # Google OAuth: optional. Prefer secrets in gitignored application-local.yml (see example file).
   # You can also set env vars GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET (or Spring-standard names below).
   security:
@@ -47,3 +52,8 @@ server:
 # Used for OAuth success redirect and links in logs. Override with FRONTEND_BASE_URL in production.
 smartcampus:
   frontend-base-url: ${FRONTEND_BASE_URL:http://localhost:5173}
+
+# Incident ticket evidence uploads (see .gitignore); same defaults as application-mysql.yml profile.
+app:
+  ticket-upload:
+    dir: ${user.dir}/data/ticket-uploads
