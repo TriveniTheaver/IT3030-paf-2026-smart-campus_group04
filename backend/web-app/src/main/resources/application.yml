@@ -1,10 +1,14 @@
 spring:
   application:
     name: smartcampus-hub
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 20MB
   datasource:
     url: ${SMARTCAMPUS_DB_URL:jdbc:mysql://localhost:3306/smartcampus?createDatabaseIfNotExist=true&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC}
     username: ${SMARTCAMPUS_DB_USERNAME:root}
-    password: ${SMARTCAMPUS_DB_PASSWORD:}
+    password: MySql@123
     driver-class-name: com.mysql.cj.jdbc.Driver
   jpa:
     hibernate:
@@ -29,3 +33,8 @@ spring:
 
 server:
   port: 8081
+
+# Incident ticket uploads (images); created automatically on startup.
+app:
+  ticket-upload:
+    dir: ${user.dir}/data/ticket-uploads
