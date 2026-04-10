@@ -12,6 +12,7 @@ import LoginPage from './modules/core/components/auth/LoginPage';
 import RegisterPage from './modules/core/components/auth/RegisterPage';
 import ForgotPasswordPage from './modules/core/components/auth/ForgotPasswordPage';
 import MockGoogleLogin from './modules/core/components/auth/MockGoogleLogin';
+import OAuthCallback from './modules/core/components/auth/OAuthCallback';
 import ProtectedRoute from './modules/core/components/auth/ProtectedRoute';
 import HomePage from './modules/core/components/public/HomePage';
 import { sliitAudienceFromEmail } from './modules/core/utils/sliitAudience';
@@ -335,6 +336,7 @@ function App() {
             <Route path="/register" element={<RegisterPage />} />
             <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             <Route path="/mock-google-login" element={<MockGoogleLogin />} />
+            <Route path="/oauth/callback" element={<OAuthCallback />} />
 
             <Route
               element={
